@@ -1,0 +1,139 @@
+version: "3"
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    volumes:
+      - ./.data/metadata_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRESQL_USERNAME}
+      - POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRES_DB=${POSTGRESQL_DB}
+    ports:
+      - ${POSTGRESQL_PORT}:${POSTGRESQL_PORT}
+
+  zookeeper:
+    image: zookeeper:3.5
+    container_name: zookeeper
+    environment:
+      - ZOO_MY_ID=${ZOO_MY_ID}
+
+  kafka:
+    image: 'bitnami/kafka:latest'
+    container_name: kafka
+    volumes:
+      - ./.data/kafka:/bitnami/kafka
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=${ZOOKEEPER_HOSTNAME}:${ZOOKEEPER_PORT}
+      - ALLOW_PLAINTEXT_LISTENER=${ALLOW_PLAINTEXT_LISTENER}
+    ports:
+      - ${KAFKA_PORT}:${KAFKA_PORT}
+    depends_on:
+      - zookeeper
+
+  coordinator:
+    image: apache/druid:0.19.0
+    container_name: coordinator
+    volumes:
+      - ./.data/coordinator:/opt/data
+    command:
+      - coordinator
+    ports:
+      - ${COORDINATOR_PORT}:${COORDINATOR_PORT}
+    depends_on:
+      - zookeeper
+      - postgres
+    env_file:
+      - ./druid/environment
+
+  broker:
+    image: apache/druid:0.19.0
+    container_name: broker
+    command:
+      - broker
+    ports:
+      - ${BROKER_PORT}:${BROKER_PORT}
+    depends_on:
+      - zookeeper
+      - postgres
+      - coordinator
+    env_file:
+      - ./druid/environment
+
+  historical:
+    image: apache/druid:0.19.0
+    container_name: historical
+    volumes:
+      - ./.data/historical:/opt/data
+    command:
+      - historical
+    ports:
+      - ${HISTORICAL_PORT}:${HISTORICAL_PORT}
+    depends_on:
+      - zookeeper
+      - postgres
+      - coordinator
+    env_file:
+      - ./druid/environment
+
+  middlemanager:
+    image: apache/druid:0.19.0
+    container_name: middlemanager
+    volumes:
+      - ./.data/middlemanager:/opt/data
+    command:
+      - middleManager
+    ports:
+      - ${MIDDLEMANAGER_PORT}:${MIDDLEMANAGER_PORT}
+    depends_on:
+      - zookeeper
+      - postgres
+      - coordinator
+    env_file:
+      - ./druid/environment
+
+  router:
+    image: apache/druid:0.19.0
+    container_name: router
+    command:
+      - router
+    ports:
+      - ${ROUTER_PORT}:${ROUTER_PORT}
+    depends_on:
+      - zookeeper
+      - postgres
+      - coordinator
+    env_file:
+      - ./druid/environment
+
+  divolte:
+    image: divolte/divolte-collector
+    container_name: divolte
+    environment:
+      - DIVOLTE_KAFKA_BROKER_LIST=${KAFKA_HOSTNAME}:${KAFKA_PORT}
+    volumes:
+      - ./divolte/:/opt/divolte/divolte-collector/conf/
+    ports:
+      - ${DIVOLTE_PORT}:${DIVOLTE_PORT}
+    depends_on:
+      - kafka
+
+  superset:
+    build:
+      context: ./superset
+    container_name: superset
+    environment:
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_FIRST_NAME=${ADMIN_FIRST_NAME}
+      - ADMIN_LAST_NAME=${ADMIN_LAST_NAME}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PWD=${ADMIN_PWD}
+    volumes:
+      - ./superset/superset_config.py:/superset/superset_config.py
+    ports:
+      - ${SUPERSET_PORT}:${SUPERSET_PORT}
+    depends_on:
+      - kafka
+      - coordinator
+      - broker
